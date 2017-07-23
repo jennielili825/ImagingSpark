@@ -36,7 +36,7 @@ class SDPPartitioner_facets(numParts: Int) extends Partitioner {
 }
 class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
   type Data = Array[Byte]
-  val scale_data: Double = 0.2;
+  val scale_data: Double = 0.1;
   val scale_compute: Double = 1.0;
 
   def main(args: Array[String]) {
@@ -110,30 +110,12 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
     }
     reppre_ifft.persist(org.apache.spark.storage.StorageLevel.MEMORY_AND_DISK)
      //printf(" the size of new rdd reppre_ifft" + reppre_ifft.count())
-   /* val reppre_ifft : RDD[((Int,Int,Int,Int,Int,Int), Data)] = {
-            val dep_extract_lsm = HashMap[(Int,Int), ListBuffer[(Int,Int,Int,Int,Int,Int)]]()
-            val beam = 0
-            val major_loop = 0
-            for (frequency <- 0 until 5) {
-                val time = 0
-                for (facet <- 0 until 36) {
-                    for (polarisation <- 0 until 4) {
-                        dep_extract_lsm.getOrElseUpdate(Tuple2(beam, major_loop), ListBuffer()) += Tuple6(beam, major_loop, frequency, time, facet, polarisation)
-                    }
-                }
-            }
-            val input_extract_lsm : RDD[((Int,Int,Int,Int,Int,Int), Data)] =
-              extract_lsm.flatMap(ix_data => dep_extract_lsm(ix_data._1).map((_, ix_data._2)))
-            input_extract_lsm.groupByKey().mapValues(Tuple1(_)).map(reppre_ifft_kernel)
-        }
-        *
-        */
- //   printf(" the size of new rdd reppre_ifft_degkerupd_deg" + reppre_ifft_degkerupd_deg.count())
+
     // === Telescope Data ===
     var degrid: RDD[((Int,Int,Int,Int,Int,Int), Data)] = {
       reppre_ifft.flatMap(ix=>degrid_kernel(ix,broads_input_telescope_data,broadcast_lsm))
     }
-
+    degrid.cache()
     val pharotpre_dft_sumvis: RDD[((Int, Int, Int, Int, Int),Data)] = {
       val dep_extract_lsm = HashMap[(Int, Int), ListBuffer[(Int, Int, Int, Int, Int, Int)]]()
       val dep_degkerupd_deg = HashMap[(Int, Int, Int, Int, Int, Int), ListBuffer[(Int, Int, Int, Int, Int, Int)]]()
@@ -148,28 +130,13 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
       degrid.partitionBy(new SDPPartitioner_pharo(20)).mapPartitions(pharotpre_dft_sumvis_kernel)
 
     }
+    pharotpre_dft_sumvis.cache()
    // printf(" the size of new rdd pharotpre_dft_sumvis" + pharotpre_dft_sumvis.count())
   //  pharotpre_dft_sumvis.cache()
     var broads_input0=sc.broadcast(pharotpre_dft_sumvis.collect())
     var broads_input1=sc.broadcast(visibility_buffer.collect())
    // printf(" the size of new rdd pharotpre_dft_sumvis" + pharotpre_dft_sumvis.count())
 
-    // === Timeslots +solve ===
-   /* val timeslots_solve: RDD[((Int, Int, Int, Int, Int, Int),Data)] = {
-      val initset = ListBuffer[(Int, Int, Int, Int, Int, Int)]()
-      val beam = 0
-      for (time <- 0 until 6) {
-        val frequency = 0
-        val baseline = 0
-        val polarisation = 0
-        val major_loop = 0
-        initset += Tuple6(beam, major_loop, frequency, time, baseline, polarisation)
-      }
-      sc.parallelize(initset).map(ix => timeslots_kernel(ix,broads_input0,broads_input1))
-
-    }*/
-    
-//    printf(" the size of new rdd timeslots" + timeslots_solve.count())
   val timeslots: RDD[((Int, Int, Int, Int, Int, Int), Data)] = {
       val initset = ListBuffer[(Int, Int, Int, Int, Int, Int)]()
       val beam = 0
@@ -183,6 +150,7 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
       sc.parallelize(initset).map(ix => timeslots_kernel(ix,broads_input0,broads_input1))
 
     }
+    timeslots.cache()
   //  printf(" the size of new rdd timeslots" + timeslots.count())
     // === Solve ===
     val solve: RDD[((Int, Int, Int, Int, Int),Data)] = {
@@ -194,9 +162,6 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
         val polarisation = 0
         dep_timeslots.getOrElseUpdate(Tuple6(beam, major_loop, frequency, time, 0, polarisation), ListBuffer()) += Tuple5(beam, major_loop, frequency, time, polarisation)
       }
-     // val input_timeslots: RDD[((Int, Int, Int, Int, Int), Data)] =
-       // timeslots.flatMap(ix_data => dep_timeslots(ix_data._1).map((_, ix_data._2)))
-      //input_timeslots.groupByKey().mapValues(Tuple1(_)).map(solve_kernel)
       timeslots.map(solve_kernel)
       
     }
@@ -235,7 +200,7 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
       }
       sc.parallelize(initset).map(ix => grikerupd_pharot_grid_fft_rep_kernel(ix, broads_input_telescope_data,broads_input))
     }
-   
+   grikerupd_pharot_grid_fft_rep.cache()
      // === Sum Facets ===
     val sum_facets: RDD[((Int, Int, Int, Int, Int, Int), Data)] = {
       val initset = ListBuffer[(Int, Int, Int, Int, Int, Int)]()
@@ -263,9 +228,6 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
           dep_sum_facets.getOrElseUpdate(Tuple6(beam, major_loop, frequency, 0, facet, i_polarisation), ListBuffer()) += Tuple4(beam, major_loop, frequency, facet)
         }
       }
-
-      //  val input_sum_facets: RDD[((Int, Int, Int, Int), Data)] =
-      //  sum_facets.flatMap(ix_data => dep_sum_facets(ix_data._1).map((_, ix_data._2)))
       sum_facets.partitionBy(new SDPPartitioner_facets(36)).mapPartitions(identify_component_kernel_partitions)
     }
     var broads_input_identify = sc.broadcast(identify_component.collect())
@@ -282,6 +244,7 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
         identify_component.flatMap(ix_data => dep_identify_component(ix_data._1).map((_, ix_data._2)))
       input_identify_component.groupByKey().mapValues(Tuple1(_)).map(source_find_kernel)
     }
+    source_find.cache()
     //  printf(" the size of new rdd source_find" + source_find.count())
     // === Subtract Image Component ===
     val subimacom: RDD[((Int, Int, Int, Int, Int), Data)] = {
@@ -298,6 +261,7 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
       }
       sum_facets.map(ix => subimacom_kernel(ix, broads_input_identify))
     }
+    subimacom.cache()
     // === Update LSM ===
     val update_lsm: RDD[((Int, Int), Data)] = {
       val dep_local_sky_model = HashMap[Unit, ListBuffer[(Int, Int)]]()
@@ -320,13 +284,7 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
   }
   def extract_lsm_kernel: ((Int, Int)) => ((Int, Int), Data) = {
     case ix =>
-      var label: String = "Extract_LSM (0.0 MB, 0.00 Tflop) " + ix.toString
-      var hash: Int = MurmurHash3.stringHash(label)
-      var input_size: Long = 0
-      println(label + " (hash " + Integer.toHexString(hash) + " from " + (input_size / 1000000).toString() + " MB input)")
-      val result = new Array[Byte](math.max(4, (scale_data * 0).toInt))
-      ByteBuffer.wrap(result).putInt(0, hash)
-      Thread.sleep((scale_compute * 0).toInt)
+       val result = new Array[Byte](math.max(4, (scale_data * 0).toInt))
       (ix, result)
   }
 
@@ -407,21 +365,13 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
 
   def reppre_ifft_kernel: ((Int, Int, Int, Int, Int, Int), Broadcast[Array[((Int, Int,Int,Int), Data)]],Broadcast[Array[((Int, Int), Data)]]) => ((Int, Int, Int, Int, Int, Int),Data) = {
     case (ix) =>
-      //  here call original reppre_ifft_kernel to generate reppre_ifft data first 
-      //get telescope data from Broadcast variable and combine  degkerupd_deg kernel here, generate degkerupd_deg data directly.
-     // var mylist = new Array[((Int, Int, Int, Int, Int, Int),Data)](4)
-      //after reppre_ifft we get the data
        val result_reffre = new Array[Byte](math.max(4, (scale_data * 329520000).toInt))
-       println(" the length aaaaaa   of reppre  "  +result_reffre.length)
        (ix._1,result_reffre)
      
       
   }
  def degrid_kernel: (((Int, Int, Int, Int, Int, Int),Data), Broadcast[Array[((Int, Int,Int,Int), Data)]],Broadcast[Array[((Int, Int), Data)]]) => TraversableOnce[(((Int, Int, Int, Int, Int, Int),Data))] = {
     case (ix) =>
-      //  here call original reppre_ifft_kernel to generate reppre_ifft data first 
-      //get telescope data from Broadcast variable and combine  degkerupd_deg kernel here, generate degkerupd_deg data directly.
-      println(" the length of ix "+ix._1._1)
       var mylist = new Array[((Int, Int, Int, Int, Int, Int),Data)](4)
       val result2 = new Array[Byte](math.max(4, (scale_data * 998572).toInt))
       val result2_2 = new Array[Byte](math.max(4, (scale_data * 998572).toInt))
@@ -526,60 +476,9 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
   def timeslots_kernel: ((Int, Int, Int, Int, Int, Int), Broadcast[Array[((Int, Int, Int, Int, Int), Data)]], Broadcast[Array[((Int, Int, Int, Int, Int), Data)]]) => ((Int, Int, Int, Int, Int, Int), Data) = {
     case ix =>
       val result = new Array[Byte](math.max(4, (scale_data * 15182856).toInt))
-      //execute solve kernel  and get the new result
-  //    val result2 = new Array[Byte](math.max(4, (scale_data * 82627788).toInt))
       (ix._1, result)
   }
-  def timeslots_kernel2: ((Int, Int, Int, Int, Int, Int)) => ((Int, Int, Int, Int, Int, Int)) = {
-    case ix =>
-      Configuration.set(PropertyKey.MASTER_HOSTNAME, "hadoop8");
-      Configuration.set(PropertyKey.MASTER_RPC_PORT, "19998");
-      System.setProperty("HADOOP_USER_NAME", "hadoop")
-      val fs = FileSystem.Factory.get();
-      for (frequency <- 0 until 20) {
-        var temp = frequency
-        val path = new AlluxioURI("/pharotpre_dft_sumvis/" + temp)
-        val path2 = new AlluxioURI("/visibility_buffer/" + temp)
-        using(fs.openFile(path, OpenFileOptions.defaults().setReadType(ReadType.CACHE))) { in =>
-          var buf = new Array[Byte](in.remaining().toInt)
-          var tempdata = in.read(buf)
-          in.close
-        }
-        using(fs.openFile(path2, OpenFileOptions.defaults().setReadType(ReadType.CACHE))) { in2 =>
-          var buf = new Array[Byte](in2.remaining().toInt)
-          var tempdata = in2.read(buf)
-          in2.close
-        }
-
-        //  }
-      } //for   
-
-      val result = new Array[Byte](math.max(4, (scale_data * 15182856).toInt))
-
-      //execute solve kernel  and get the new result
-      val result2 = new Array[Byte](math.max(4, (scale_data * 82627788).toInt))
-      val path3 = new AlluxioURI("/solve/" + ix._4)
-      using(fs.createFile(path3, CreateFileOptions.defaults().setWriteType(WriteType.MUST_CACHE))) { out =>
-        out.write(result2)
-      } //using
-      (ix)
-  }
- /* def solve_kernel: (((Int, Int, Int, Int, Int), Tuple1[Iterable[Data]])) => (Int, Int, Int, Int, Int) = {
-    case (ix, Tuple1(data_timeslots)) =>
-      var label: String = "Solve (8262.8 MB, 2939.73 Tflop) " + ix.toString
-      var hash: Int = MurmurHash3.stringHash(label)
-      Configuration.set(PropertyKey.MASTER_HOSTNAME, "node9");
-      Configuration.set(PropertyKey.MASTER_RPC_PORT, "19998");
-      System.setProperty("HADOOP_USER_NAME", "hadoop")
-      val fs = FileSystem.Factory.get();
-      val result = new Array[Byte](math.max(4, (scale_data * 82627788).toInt))
-      val path3 = new AlluxioURI("/solve/" + ix._4)
-      using(fs.createFile(path3, CreateFileOptions.defaults().setWriteType(WriteType.MUST_CACHE))) { out =>
-        out.write(result)
-      } //using
-      (ix)
-  }*/
-  
+ 
   def solve_kernel: ((((Int, Int, Int, Int, Int,Int),Data))) => ((Int, Int, Int, Int, Int),Data) = {
     case ix =>
       val result = new Array[Byte](math.max(4, (scale_data * 82627788).toInt))
@@ -606,16 +505,16 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
   def identify_component_kernel: (((Int, Int, Int, Int), Tuple1[Iterable[Data]])) => ((Int, Int, Int, Int), Data) = {
     case (ix, Tuple1(data_sum_facets)) =>
       var label: String = "Identify Component (0.2 MB, 4118.87 Tflop) " + ix.toString
-      var hash: Int = MurmurHash3.stringHash(label)
-      var input_size: Long = 0
-      for (data <- data_sum_facets) {
-        hash ^= MurmurHash3.bytesHash(data.slice(0, 4))
-        input_size += data.length
-      }
-      println(label + " (hash " + Integer.toHexString(hash) + " from " + (input_size / 1000000).toString() + " MB input)")
+   //   var hash: Int = MurmurHash3.stringHash(label)
+    //  var input_size: Long = 0
+    //  for (data <- data_sum_facets) {
+      //  hash ^= MurmurHash3.bytesHash(data.slice(0, 4))
+        //input_size += data.length
+      //}
+     // println(label + " (hash " + Integer.toHexString(hash) + " from " + (input_size / 1000000).toString() + " MB input)")
       val result = new Array[Byte](math.max(4, (scale_data * 1600).toInt))
-      ByteBuffer.wrap(result).putInt(0, hash)
-      Thread.sleep((scale_compute * 664334).toInt)
+    //  ByteBuffer.wrap(result).putInt(0, hash)
+    //  Thread.sleep((scale_compute * 664334).toInt)
       (ix, result)
   }
    def identify_component_kernel_partitions: (Iterator[((Int, Int, Int, Int, Int, Int), Data)]) => Iterator[((Int, Int, Int, Int), Data)] = {

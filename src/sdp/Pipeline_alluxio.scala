@@ -68,28 +68,6 @@ object Pipeline_alluxio {
       sc.parallelize(initset).map(visibility_buffer_kernel)
     }
     printf(" the size of new rdd visibility_buffer" + visibility_buffer.count())
-    // === Reprojection Predict + IFFT ===
-   /* val reppre_ifft: RDD[(Int, Int, Int, Int, Int, Int)] = {
-      val dep_extract_lsm = HashMap[(Int, Int), ListBuffer[(Int, Int, Int, Int, Int, Int)]]()
-      val beam = 0
-      val major_loop = 0
-      for (frequency <- 0 until 5) {
-        val time = 0
-        for (facet <- 0 until 36) {
-          for (polarisation <- 0 until 4) {
-            dep_extract_lsm.getOrElseUpdate(Tuple2(beam, major_loop), ListBuffer()) += Tuple6(beam, major_loop, frequency, time, facet, polarisation)
-          }
-        }
-      }
-      val input_extract_lsm: RDD[((Int, Int, Int, Int, Int, Int), Data)] =
-        extract_lsm.flatMap(ix_data => dep_extract_lsm(ix_data._1).map((_, ix_data._2)))
-      input_extract_lsm.groupByKey().mapValues(Tuple1(_)).map(reppre_ifft_kernel)
-    }*/
-    
-    
-     
-     
-    //printf(" the size of new rdd reppre_ifft_degkerupd_deg" + reppre_ifft.count())
     // === Telescope Data ===
     val telescope_data: RDD[((Int, Int, Int, Int), Data)] = {
       val dep_telescope_management = HashMap[Unit, ListBuffer[(Int, Int, Int, Int)]]()
@@ -125,6 +103,7 @@ object Pipeline_alluxio {
      var degrid: RDD[((Int,Int,Int,Int,Int,Int), Data)] = {
       reppre_ifft.flatMap(ix=>degrid_kernel(ix,broads_input_telescope_data,broadcast_lsm))
     }
+      degrid.cache()
       val pharotpre_dft_sumvis: RDD[(Int, Int, Int, Int, Int)] = {
       val dep_extract_lsm = HashMap[(Int, Int), ListBuffer[(Int, Int, Int, Int, Int, Int)]]()
       val dep_degkerupd_deg = HashMap[(Int, Int, Int, Int, Int, Int), ListBuffer[(Int, Int, Int, Int, Int, Int)]]()
@@ -139,23 +118,8 @@ object Pipeline_alluxio {
       degrid.partitionBy(new SDPPartitioner_pharo_alluxio(20)).mapPartitions(pharotpre_dft_sumvis_kernel2)
 
     }
-       printf(" the size of new rdd pharotpre_dft_sumvis" + pharotpre_dft_sumvis.count())
-  /*  val pharotpre_dft_sumvis: RDD[(Int, Int, Int, Int, Int)] = {
-      val dep_extract_lsm = HashMap[(Int, Int), ListBuffer[(Int, Int, Int, Int, Int, Int)]]()
-      val dep_degkerupd_deg = HashMap[(Int, Int, Int, Int, Int, Int), ListBuffer[(Int, Int, Int, Int, Int, Int)]]()
-      val initset = ListBuffer[(Int, Int, Int, Int, Int)]()
-      val beam = 0
-      for (frequency <- 0 until 20) {
-        val time = 0
-        val baseline = 0
-        val polarisation = 0
-        initset += Tuple5(beam, frequency, time, baseline, polarisation)
-      }
-      sc.parallelize(initset).map(pharotpre_dft_sumvis_kernel2)
-
-    }*/
-
-  //  printf(" the size of new rdd pharotpre_dft_sumvis" + pharotpre_dft_sumvis.count())
+      // The count is necessary, because Spark is lazy and the pharotpre_dft_sumvis stage should be trigered.
+    printf(" the size of new rdd pharotpre_dft_sumvis" + pharotpre_dft_sumvis.count())
     // === Timeslots ===
     val timeslots: RDD[((Int, Int, Int, Int, Int, Int), Data)] = {
       val initset = ListBuffer[(Int, Int, Int, Int, Int, Int)]()
@@ -170,8 +134,6 @@ object Pipeline_alluxio {
       sc.parallelize(initset).map(timeslots_kernel)
 
     }
-    printf(" the size of new rdd timeslots" + timeslots.count())
-    // === Solve ===
     val solve: RDD[(Int, Int, Int, Int, Int)] = {
       val dep_timeslots = HashMap[(Int, Int, Int, Int, Int, Int), ListBuffer[(Int, Int, Int, Int, Int)]]()
       val beam = 0
@@ -185,7 +147,7 @@ object Pipeline_alluxio {
         timeslots.flatMap(ix_data => dep_timeslots(ix_data._1).map((_, ix_data._2)))
       input_timeslots.groupByKey().mapValues(Tuple1(_)).map(solve_kernel)
     }
-    printf(" the size of new rdd solve" + solve.count())
+    printf("solve    count  "+solve.count())
     // === Correct + Subtract Visibility + Flag ===
     val cor_subvis_flag: RDD[((Int, Int, Int, Int, Int, Int),Data)] = {
       val initset = ListBuffer[(Int, Int, Int, Int, Int, Int)]()
@@ -201,25 +163,6 @@ object Pipeline_alluxio {
 
     }
     cor_subvis_flag.cache()
-  //  printf(" the size of cor_subvis_flag" + cor_subvis_flag.count())
-   /* val cor_subvis_flag_data: HashMap[Int, Data] = {
-      var result = HashMap[Int, Data]()
-      Configuration.set(PropertyKey.MASTER_HOSTNAME, "hadoop8");
-      Configuration.set(PropertyKey.MASTER_RPC_PORT, "19998");
-      System.setProperty("HADOOP_USER_NAME", "hadoop")
-      val fs = FileSystem.Factory.get();
-      for (frequency <- 0 until 20) {
-        var temp = frequency
-        val path = new AlluxioURI("/cor_subvis_flag/" + frequency)
-        using(fs.openFile(path, OpenFileOptions.defaults().setReadType(ReadType.CACHE))) { in =>
-          var buf = new Array[Byte](in.remaining().toInt)
-          var tempdata = in.read(buf)
-          result += Tuple2(temp, buf)
-          //   in.close
-        }
-      } //for
-      result
-    }*/
     var broads_input1 = sc.broadcast(cor_subvis_flag.collect())
     // === Gridding Kernel Update + Phase Rotation + Grid + FFT + Reprojection ===
     val grikerupd_pharot_grid_fft_rep: RDD[((Int, Int, Int, Int, Int, Int), Data)] = {
