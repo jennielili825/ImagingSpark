@@ -31,13 +31,16 @@ object Pipeline_alluxio2 {
     }
   }
   type Data = Array[Byte]
-  val scale_data: Double = 0.25;
-  val scale_compute: Double = 1.0;
-  var alluxioHost = "hadoop8"
+  var scale_data: Double = 1.0;
+  var scale_compute: Double = 1.0;
+  var alluxioHost = "hadoop54"
   var alluxioPort = "19998"
   def main(args: Array[String]) {
     val conf = new SparkConf().setAppName("SDP Pipeline")
     val sc = new SparkContext(conf)
+    scale_data=args(0).toDouble
+    alluxioHost=args(1).toString()
+    printf(" scale_data   "+scale_data+"     alluxioHost   "+alluxioHost)
     val extract_lsm: RDD[((Int, Int), Data)] = {
       val initset = ListBuffer[(Int, Int)]()
       val beam = 0
@@ -240,8 +243,10 @@ object Pipeline_alluxio2 {
           dep_sum_facets.getOrElseUpdate(Tuple6(beam, major_loop, frequency, 0, facet, polarisation), ListBuffer()) += Tuple5(beam, major_loop, frequency, facet, polarisation)
         }
       }
-      sum_facets.map(ix => subimacom_kernel(ix, broads_input2))
+      sum_facets.repartition(1).mapPartitions(ix => subimacom_kernel(ix, broads_input2))
+    //  sum_facets.map(ix => subimacom_kernel(ix, broads_input_identify))
     }
+    subimacom.cache()
     // === Update LSM ===
     val update_lsm: RDD[((Int, Int), Data)] = {
       val dep_local_sky_model = HashMap[Unit, ListBuffer[(Int, Int)]]()
@@ -260,6 +265,7 @@ object Pipeline_alluxio2 {
     println("Finishing...")
     println(f"Update LSM: ${update_lsm.count()}%d")
     println(f"Subtract Image Component: ${subimacom.count()}%d")
+    sc.stop()
   }
   def extract_lsm_kernel: ((Int, Int)) => ((Int, Int), Data) = {
     case ix =>
@@ -315,7 +321,6 @@ object Pipeline_alluxio2 {
         out.write(result)
       }
       (ix)
-
   }
   def reppre_ifft_kernel: ((Int, Int, Int, Int, Int, Int), Broadcast[Array[((Int, Int, Int, Int), Data)]], Broadcast[Array[((Int, Int), Data)]]) => (Int, Int, Int, Int, Int, Int) = {
     case (ix) =>
@@ -364,10 +369,10 @@ object Pipeline_alluxio2 {
       }
 
       var mylist = new Array[((Int, Int, Int, Int, Int, Int), Data)](4)
-      val result2 = new Array[Byte](math.max(4, (scale_data * 998572).toInt))
-      val result2_2 = new Array[Byte](math.max(4, (scale_data * 998572).toInt))
-      val result2_3 = new Array[Byte](math.max(4, (scale_data * 998572).toInt))
-      val result2_4 = new Array[Byte](math.max(4, (scale_data * 998572).toInt))
+      val result2 = new Array[Byte](math.max(4, (scale_data * 296108L).toInt))
+      val result2_2 = new Array[Byte](math.max(4, (scale_data * 296108L).toInt))
+      val result2_3 = new Array[Byte](math.max(4, (scale_data * 296108L).toInt))
+      val result2_4 = new Array[Byte](math.max(4, (scale_data * 296108L).toInt))
 
       var temp1 = ix._1._3 * 4
       mylist(0) = ((ix._1._1, ix._1._2, temp1, ix._1._4, ix._1._5, ix._1._6), result2)
@@ -567,18 +572,31 @@ object Pipeline_alluxio2 {
       (ix, result)
   }
 
-  def subimacom_kernel: (((Int, Int, Int, Int, Int, Int), Data), Broadcast[Array[((Int, Int, Int, Int), Data)]]) => ((Int, Int, Int, Int, Int), Data) = {
+   def subimacom_kernel: (Iterator[((Int, Int, Int, Int, Int, Int), Data)], Broadcast[Array[((Int, Int, Int, Int), Data)]]) => Iterator[((Int, Int, Int, Int, Int), Data)] = {
     case (ix) =>
-      var label: String = "Subtract Image Component (167.9 MB, 4118.87 Tflop) " + ix.toString
+      var label : String = "Subtract Image Component (121044.4 MB, 67.14 Tflop) "+ix.toString
       var hash: Int = MurmurHash3.stringHash(label)
       var input_size: Long = 0
-
+      var result2 = new Array[((Int, Int, Int,Int, Int), Data)](1)
       println(label + " (hash " + Integer.toHexString(hash) + " from " + (input_size / 1000000).toString() + " MB input)")
-      val result = new Array[Byte](math.max(4, (scale_data * 1678540).toInt))
+      val result = new Array[Byte](math.max(4, (scale_data * 403481447L).toInt))
       ByteBuffer.wrap(result).putInt(0, hash)
-      var aa = ix._1._1
-      ((aa._1, aa._2, aa._3, aa._5, aa._6), result)
+      //  Thread.sleep((scale_compute * 664334).toInt)
+      if (ix._1.hasNext) {
+        var temp = ix._1.next()
+        var result2 = new Array[((Int, Int, Int, Int,Int), Data)](1)
+        result2(0) = ((temp._1._1, temp._1._2, temp._1._3, temp._1._5,temp._1._6), result)
+        result2.iterator
+
+      } else {
+        // The condition is never satisfied
+        var result2 = new Array[((Int, Int, Int,Int, Int), Data)](1)
+        result2(0) = ((0, 0, 0,0, 0), result)
+        result2.iterator
+
+      }
   }
+
 
   def update_lsm_kernel: (((Int, Int), (Iterable[Data], Iterable[Data]))) => ((Int, Int), Data) = {
     case (ix, (data_local_sky_model, data_source_find)) =>

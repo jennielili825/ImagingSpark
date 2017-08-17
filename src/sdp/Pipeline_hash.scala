@@ -14,14 +14,14 @@ object Pipeline_hash {
 
     type Data = Array[Byte]
 
-    val scale_data : Double = 0.25;
+    var scale_data : Double = 0.20;
     val scale_compute : Double = 1.0;
 
     
     def main(args : Array[String]) {
         val conf = new SparkConf().setAppName("SDP Pipeline")
         val sc = new SparkContext(conf)
-
+        scale_data=args(0).toDouble
         var rdd_count = 0
 
         //  Tsnap       = 85.1 s
@@ -129,6 +129,8 @@ object Pipeline_hash {
             val beam = 0
             val major_loop = 0
             for (frequency <- 0 until 20) {
+              
+              
                 val time = 0
                 val baseline = 0
                 val polarisation = 0
@@ -143,6 +145,9 @@ object Pipeline_hash {
                 val result_ix = Tuple6(beam, major_loop, frequency, time, baseline, polarisation)
                 result += Tuple2(result_ix, sc.union(dep_degkerupd_deg ++ dep_extract_lsm).repartition(1).glom().map((result_ix,_)).map(pharotpre_dft_sumvis_kernel))
                 rdd_count += 1
+                
+                
+                
             }
             result
         }
@@ -326,6 +331,7 @@ object Pipeline_hash {
         for (dep <- dep_update_lsm) {
             println(f"Update LSM: ${dep.count()}%d")
         }
+        sc.stop()
     }
     def extract_lsm_kernel : ((Int,Int)) => Data = { case ix =>
         var label : String = "Extract_LSM (0.0 MB, 0.00 Tflop) "+ix.toString

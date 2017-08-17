@@ -34,15 +34,17 @@ class SDPPartitioner_facets(numParts: Int) extends Partitioner {
     key.toString.split(',')(3).toInt
   }
 }
-class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
+class Pipeline_partitioning(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
   type Data = Array[Byte]
-  val scale_data: Double = 0.25;
-  val scale_compute: Double = 1.0;
+  var scale_data: Double = 0.2;
+  var scale_compute: Double = 1.0;
 
   def main(args: Array[String]) {
 	    val conf = new SparkConf().setAppName("SDP Pipeline")
 	    val sc = new SparkContext(conf)
-	    val extract_lsm: RDD[((Int, Int), Data)] = {
+	     scale_data=args(0).toDouble
+	     printf(" scale   is    "+scale_data)
+   val extract_lsm: RDD[((Int, Int), Data)] = {
 	    val initset = ListBuffer[(Int, Int)]()
 	    val beam = 0
 	    val major_loop = 0
@@ -108,7 +110,8 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
       }
       sc.parallelize(initset).map(ix=>reppre_ifft_kernel(ix,broads_input_telescope_data,broadcast_lsm))
     }
-    reppre_ifft.persist(org.apache.spark.storage.StorageLevel.MEMORY_AND_DISK)
+    reppre_ifft.cache()
+    //reppre_ifft.persist(org.apache.spark.storage.StorageLevel.MEMORY_AND_DISK)
      //printf(" the size of new rdd reppre_ifft" + reppre_ifft.count())
 
     // === Telescope Data ===
@@ -127,7 +130,7 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
         val polarisation = 0
         initset += Tuple5(beam, frequency, time, baseline, polarisation)
       }
-      degrid.partitionBy(new SDPPartitioner_pharo(20)).mapPartitions(pharotpre_dft_sumvis_kernel)
+      degrid.partitionBy(new SDPPartitioner_pharo(20)).mapPartitions(ix=>pharotpre_dft_sumvis_kernel(ix,broads_input_telescope_data))
 
     }
     pharotpre_dft_sumvis.cache()
@@ -259,7 +262,8 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
           dep_sum_facets.getOrElseUpdate(Tuple6(beam, major_loop, frequency, 0, facet, polarisation), ListBuffer()) += Tuple5(beam, major_loop, frequency, facet, polarisation)
         }
       }
-      sum_facets.map(ix => subimacom_kernel(ix, broads_input_identify))
+      sum_facets.repartition(1).mapPartitions(ix => subimacom_kernel(ix, broads_input_identify))
+    //  sum_facets.map(ix => subimacom_kernel(ix, broads_input_identify))
     }
     subimacom.cache()
     // === Update LSM ===
@@ -391,16 +395,16 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
       Thread.sleep((scale_compute * 23).toInt)
       (ix, result)
   }
-  def pharotpre_dft_sumvis_kernel: (Iterator[((Int, Int, Int, Int, Int, Int), Data)]) => (Iterator[((Int, Int, Int, Int, Int),Data)]) = {
+  def pharotpre_dft_sumvis_kernel: (Iterator[((Int, Int, Int, Int, Int, Int), Data)],Broadcast[Array[((Int, Int, Int, Int), Data)]]) => (Iterator[((Int, Int, Int, Int, Int),Data)]) = {
     case (ix) =>
       var label : String = "Phase Rotation Predict + DFT + Sum visibilities (46168.5 MB, 131.08 Tflop) "+ix.toString
       //read data from alluxio
        val result = new Array[Byte](math.max(4, (scale_data * 153895035L).toInt))
        var result2 = new Array[((Int, Int, Int, Int,Int),Data)](1)
    
-    if(ix.hasNext)
+    if(ix._1.hasNext)
     {
-         var temp=ix.next()
+         var temp=ix._1.next()
          var result2 = new Array[((Int, Int, Int, Int,Int),Data)](1)
          result2(0)=((temp._1._1,temp._1._2,temp._1._3,temp._1._4,temp._1._6),result)
          result2.iterator
@@ -494,18 +498,29 @@ class A(val aa :Array[((Int, Int, Int, Int, Int, Int),Array[Byte])])
       (ix, result)
   }
 
- def subimacom_kernel: (((Int, Int, Int, Int, Int, Int), Data), Broadcast[Array[((Int, Int, Int, Int), Data)]]) => ((Int, Int, Int, Int, Int), Data) = {
+ def subimacom_kernel: (Iterator[((Int, Int, Int, Int, Int, Int), Data)], Broadcast[Array[((Int, Int, Int, Int), Data)]]) => Iterator[((Int, Int, Int, Int, Int), Data)] = {
     case (ix) =>
       var label : String = "Subtract Image Component (121044.4 MB, 67.14 Tflop) "+ix.toString
       var hash: Int = MurmurHash3.stringHash(label)
       var input_size: Long = 0
-
+      var result2 = new Array[((Int, Int, Int,Int, Int), Data)](1)
       println(label + " (hash " + Integer.toHexString(hash) + " from " + (input_size / 1000000).toString() + " MB input)")
       val result = new Array[Byte](math.max(4, (scale_data * 403481447L).toInt))
       ByteBuffer.wrap(result).putInt(0, hash)
       //  Thread.sleep((scale_compute * 664334).toInt)
-      var aa = ix._1._1
-      ((aa._1, aa._2, aa._3, aa._5, aa._6), result)
+      if (ix._1.hasNext) {
+        var temp = ix._1.next()
+        var result2 = new Array[((Int, Int, Int, Int,Int), Data)](1)
+        result2(0) = ((temp._1._1, temp._1._2, temp._1._3, temp._1._5,temp._1._6), result)
+        result2.iterator
+
+      } else {
+        // The condition is never satisfied
+        var result2 = new Array[((Int, Int, Int,Int, Int), Data)](1)
+        result2(0) = ((0, 0, 0,0, 0), result)
+        result2.iterator
+
+      }
   }
 
   def update_lsm_kernel: (((Int, Int), (Iterable[Data], Iterable[Data]))) => ((Int, Int), Data) = {
